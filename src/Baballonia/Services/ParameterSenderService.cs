@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -21,7 +22,7 @@ public class ParameterSenderService : BackgroundService
 
     private string prefix = "";
     private bool sendNativeVrcEyeTracking;
-    private readonly Queue<OscMessage> _sendQueue = new();
+    private readonly ConcurrentQueue<OscMessage> _sendQueue = new();
 
     // Expression parameter names
     public readonly Dictionary<string, string> EyeExpressionMap = new()
@@ -108,8 +109,8 @@ public class ParameterSenderService : BackgroundService
         {
             try
             {
-                prefix = await localSettingsService.ReadSettingAsync<string>("AppSettings_OSCPrefix");
-                sendNativeVrcEyeTracking = await localSettingsService.ReadSettingAsync<bool>("VRC_UseNativeTracking");
+                prefix = localSettingsService.ReadSetting<string>("AppSettings_OSCPrefix");
+                sendNativeVrcEyeTracking = localSettingsService.ReadSetting<bool>("VRC_UseNativeTracking");
                 await SendAndClearQueue(cancellationToken);
                 await Task.Delay(10, cancellationToken);
             }

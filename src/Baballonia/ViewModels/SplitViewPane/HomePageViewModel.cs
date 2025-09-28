@@ -1,26 +1,29 @@
 using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Globalization;
+using System.IO;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using Baballonia.Contracts;
+using Baballonia.Factories;
 using Baballonia.Helpers;
 using Baballonia.Services;
 using Baballonia.Services.Inference;
 using Baballonia.Services.Inference.Enums;
 using Baballonia.Services.Inference.Models;
+using Baballonia.Services.Inference.Platforms;
 using Baballonia.Services.Inference.VideoSources;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.DependencyInjection;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using OpenCvSharp;
 using Buffer = System.Buffer;
 using Rect = Avalonia.Rect;
@@ -52,69 +55,107 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
         [ObservableProperty] private float _gamma = 1f;
         [ObservableProperty] private bool _isCropMode = false;
         [ObservableProperty] private bool _isCameraRunning = false;
+        [ObservableProperty] private int _selectedCaptureMethod = -1;
+        [ObservableProperty] private bool _captureMethodVisible = false;
         public ObservableCollection<string> Suggestions { get; set; } = [];
+        public ObservableCollection<string> CaptureMethods { get; set; } = [];
 
-        private readonly ILocalSettingsService _localSettingsService;
+        private readonly ILocalSettingsService LocalSettingsService;
         private readonly DefaultProcessingPipeline _processingPipeline;
+
+        private Stopwatch _deviceUpdateDebounce = new();
 
         public CameraControllerModel(ILocalSettingsService localSettingsService, string name,
             DefaultProcessingPipeline processingPipeline, string[] cameras, Camera camera)
         {
-            _localSettingsService = localSettingsService;
+            LocalSettingsService = localSettingsService;
             _processingPipeline = processingPipeline;
             Name = name;
             Camera = camera;
 
-            _ = InitializeAsync(cameras);
+            Initialize(cameras);
+
+            _deviceUpdateDebounce.Start();
 
             _processingPipeline.TransformedFrameEvent += ImageUpdateEventHandler;
         }
 
-        private async Task InitializeAsync(string[] cameras)
+
+        partial void OnDisplayAddressChanged(string value)
         {
-            var displayAddress = await _localSettingsService.ReadSettingAsync<string>("LastOpened" + Name);
-            var camSettings = await _localSettingsService.ReadSettingAsync<CameraSettings>(Name);
-            Dispatcher.UIThread.Post(() =>
+            if (PlatformConnector.Captures.Count <= 0) PlatformConnectorFactory.Create(NullLogger.Instance, "temp");
+
+            var matches = PlatformConnector.Captures.Where(i => i.Key.CanConnect(value)).ToArray();
+
+            var shouldShow = matches.Length >= 2;
+            CaptureMethodVisible = shouldShow;
+
+            CaptureMethods.Clear();
+            if (shouldShow)
             {
-                UpdateCameraDropDown(cameras);
+                CaptureMethods.Add(Assets.Resources.Home_Backend_Default);
+                foreach (var match in matches)
+                    CaptureMethods.Add(match.Value.Name);
+            }
 
-                DisplayAddress = displayAddress;
-                FlipHorizontally = camSettings.UseHorizontalFlip;
-                FlipVertically = camSettings.UseVerticalFlip;
-                Rotation = camSettings.RotationRadians;
-                Gamma = camSettings.Gamma;
+            SelectedCaptureMethod = shouldShow ? 0 : -1;
+        }
 
-                CropManager.SetCropZone(camSettings.Roi);
-                OverlayRectangle = CropManager.CropZone.GetRect();
-                OnCropUpdated();
+        private void Initialize(string[] cameras)
+        {
+            var displayAddress = LocalSettingsService.ReadSetting<string>("LastOpened" + Name);
+            var preferredCapture = LocalSettingsService.ReadSetting<string>("LastOpenedPreferredCapture" + Name);
+            var camSettings = LocalSettingsService.ReadSetting<CameraSettings>(Name);
 
-                IsInitialized.SetResult();
-                switch (_processingPipeline.VideoSource)
-                {
-                    case null:
-                        return;
-                    case SingleCameraSource singleCamera:
-                        IsCameraRunning = true;
-                        StartButtonEnabled = false;
-                        StopButtonEnabled = true;
-                        break;
-                    case DualCameraSource dualCamera:
-                        switch (Camera)
-                        {
-                            case Camera.Left when dualCamera.LeftCam == null:
-                            case Camera.Right when dualCamera.RightCam == null:
-                                return;
-                            default:
-                                IsCameraRunning = true;
-                                StartButtonEnabled = false;
-                                StopButtonEnabled = true;
-                                break;
-                        }
+            UpdateCameraDropDown(cameras);
+            DisplayAddress = displayAddress;
+            var selectedIndex = CaptureMethods.IndexOf(preferredCapture);
+            if (selectedIndex != -1) SelectedCaptureMethod = selectedIndex;
+            FlipHorizontally = camSettings.UseHorizontalFlip;
+            FlipVertically = camSettings.UseVerticalFlip;
+            Rotation = camSettings.RotationRadians;
+            Gamma = camSettings.Gamma;
 
-                        break;
-                }
+            CropManager.SetCropZone(camSettings.Roi);
+            OverlayRectangle = CropManager.CropZone.GetRect();
+            OnCropUpdated();
 
-            }, DispatcherPriority.Background);
+            switch (_processingPipeline.VideoSource)
+            {
+                case null:
+                    break;
+                case SingleCameraSource singleCamera:
+                    IsCameraRunning = true;
+                    StartButtonEnabled = false;
+                    StopButtonEnabled = true;
+                    break;
+                case DualCameraSource dualCamera:
+                    switch (Camera)
+                    {
+                        case Camera.Left when dualCamera.LeftCam == null:
+                        case Camera.Right when dualCamera.RightCam == null:
+                            break;
+                        default:
+                            IsCameraRunning = true;
+                            StartButtonEnabled = false;
+                            StopButtonEnabled = true;
+                            break;
+                    }
+
+                    break;
+            }
+
+            IsInitialized.SetResult();
+        }
+
+        public void UpdateCameraDropDown()
+        {
+            if (_deviceUpdateDebounce.Elapsed < TimeSpan.FromSeconds(5)) return;
+            _deviceUpdateDebounce.Restart();
+
+            var cameras = App.DeviceEnumerator.UpdateCameras();
+            var cameraNames = cameras.Keys.ToArray();
+            UpdateCameraDropDown(cameraNames);
         }
 
         public void UpdateCameraDropDown(string[] cameras)
@@ -163,6 +204,10 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
             StopButtonEnabled = false;
         }
 
+        public string SelectedPreferredCapture =>
+            CaptureMethods.Count <= 0 || (SelectedCaptureMethod < 0 || SelectedCaptureMethod >= CaptureMethods.Count)
+                ? "Default"
+                : CaptureMethods[SelectedCaptureMethod];
         void ImageUpdateEventHandler(Mat image)
         {
             if (image == null)
@@ -253,11 +298,6 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
             Bitmap = tmp;
         }
 
-        partial void OnBitmapChanged(WriteableBitmap? value)
-        {
-            // IsCameraRunning = value != null;
-        }
-
         partial void OnFlipHorizontallyChanged(bool value)
         {
             var t = _processingPipeline.ImageTransformer;
@@ -317,14 +357,14 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
             var t = _processingPipeline.ImageTransformer;
             if (t is ImageTransformer transformer)
             {
-                _localSettingsService.SaveSettingAsync(Name, transformer.Transformation);
+                LocalSettingsService.SaveSetting(Name, transformer.Transformation);
             }
             else if (t is DualImageTransformer dualTransformer)
             {
                 if (Camera == Camera.Left)
-                    _localSettingsService.SaveSettingAsync(Name, dualTransformer.LeftTransformer.Transformation);
+                    LocalSettingsService.SaveSetting(Name, dualTransformer.LeftTransformer.Transformation);
                 if (Camera == Camera.Right)
-                    _localSettingsService.SaveSettingAsync(Name, dualTransformer.RightTransformer.Transformation);
+                    LocalSettingsService.SaveSetting(Name, dualTransformer.RightTransformer.Transformation);
             }
         }
 
@@ -387,7 +427,6 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
     public IOscTarget OscTarget { get; }
     private OscRecvService OscRecvService { get; }
     private OscSendService OscSendService { get; }
-    private ILocalSettingsService LocalSettingsService { get; }
 
     private int _messagesRecvd;
     [ObservableProperty] private string _messagesInPerSecCount;
@@ -396,19 +435,24 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _messagesOutPerSecCount;
 
     [ObservableProperty] private bool _shouldEnableEyeCalibration;
-    [ObservableProperty] private string _selectedCalibrationText;
+    public TextBlock SelectedCalibrationTextBlock;
 
+    public bool IsRunningAsAdmin => Utils.HasAdmin;
+
+    [ObservableProperty] private bool _isInitialized = false;
     [ObservableProperty] private CameraControllerModel _leftCamera;
     [ObservableProperty] private CameraControllerModel _rightCamera;
     [ObservableProperty] private CameraControllerModel _faceCamera;
 
-    public readonly TaskCompletionSource camerasInitialized = new();
+    public readonly TaskCompletionSource CamerasInitialized = new();
+
+    public readonly ILocalSettingsService LocalSettingsService;
+    public readonly ProcessingLoopService ProcessingLoopService;
 
     private readonly DispatcherTimer _msgCounterTimer;
-    private readonly ILocalSettingsService _localSettingsService;
-    private readonly ProcessingLoopService _processingLoopService;
     private readonly DropOverlayService _dropOverlayService;
 
+    public string RequestedVRCalibration = CalibrationRoutine.Map["QuickCalibration"];
 
     private ILogger<HomePageViewModel> _logger;
 
@@ -418,10 +462,11 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
         OscRecvService = Ioc.Default.GetService<OscRecvService>()!;
         OscSendService = Ioc.Default.GetService<OscSendService>()!;
         LocalSettingsService = Ioc.Default.GetService<ILocalSettingsService>()!;
-        _localSettingsService = Ioc.Default.GetRequiredService<ILocalSettingsService>()!;
-        _processingLoopService = Ioc.Default.GetService<ProcessingLoopService>()!;
+        LocalSettingsService = Ioc.Default.GetRequiredService<ILocalSettingsService>()!;
+        ProcessingLoopService = Ioc.Default.GetService<ProcessingLoopService>()!;
         _logger = Ioc.Default.GetService<ILogger<HomePageViewModel>>()!;
         _dropOverlayService = Ioc.Default.GetService<DropOverlayService>()!;
+
         LocalSettingsService.Load(this);
 
         MessagesInPerSecCount = "0";
@@ -442,42 +487,50 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
         };
         _msgCounterTimer.Start();
 
-        Task.Run(async () =>
+        Initialize();
+
+        ProcessingLoopService.PipelineExceptionEvent += PipelineExceptionEventHandler;
+    }
+
+    private void Initialize()
+    {
+        bool hasRead = LocalSettingsService.ReadSetting<bool>("SecondsWarningRead");
+        if (!hasRead)
         {
-            bool hasRead = await _localSettingsService.ReadSettingAsync<bool>("SecondsWarningRead");
-            if (!hasRead)
-            {
-                _dropOverlayService.Show();
-            }
+            _dropOverlayService.Show();
+        }
 
-            var cameras = await App.DeviceEnumerator.UpdateCameras();
-            var cameraNames = cameras.Keys.ToArray();
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                LeftCamera = new CameraControllerModel(_localSettingsService, "LeftCamera",
-                    _processingLoopService.EyesProcessingPipeline, cameraNames, Camera.Left);
-                RightCamera = new CameraControllerModel(_localSettingsService, "RightCamera",
-                    _processingLoopService.EyesProcessingPipeline, cameraNames, Camera.Right);
-                FaceCamera = new CameraControllerModel(_localSettingsService, "FaceCamera",
-                    _processingLoopService.FaceProcessingPipeline, cameraNames, Camera.Face);
-                camerasInitialized.SetResult();
-            });
+        var cameras = App.DeviceEnumerator.UpdateCameras();
+        var cameraNames = cameras.Keys.ToArray();
 
-            await camerasInitialized.Task;
-            await LeftCamera.IsInitialized.Task;
+        LeftCamera = new CameraControllerModel(LocalSettingsService, "LeftCamera",
+            ProcessingLoopService.EyesProcessingPipeline, cameraNames, Camera.Left);
+        RightCamera = new CameraControllerModel(LocalSettingsService, "RightCamera",
+            ProcessingLoopService.EyesProcessingPipeline, cameraNames, Camera.Right);
+        FaceCamera = new CameraControllerModel(LocalSettingsService, "FaceCamera",
+            ProcessingLoopService.FaceProcessingPipeline, cameraNames, Camera.Face);
+
+        IsInitialized = true;
+
+        _ = TryStartCamerasAsync();
+    }
+
+    private async Task TryStartCamerasAsync()
+    {
+        await LeftCamera.IsInitialized.Task;
+        if (!LeftCamera.IsCameraRunning)
             await StartCameraAsync(LeftCamera);
-            await RightCamera.IsInitialized.Task;
+        await RightCamera.IsInitialized.Task;
+        if (!RightCamera.IsCameraRunning)
             await StartCameraAsync(RightCamera);
-            await FaceCamera.IsInitialized.Task;
+        await FaceCamera.IsInitialized.Task;
+        if (!FaceCamera.IsCameraRunning)
             await StartCameraAsync(FaceCamera);
-        });
-
-        _processingLoopService.PipelineExceptionEvent += PipelineExceptionEventHandler;
     }
 
     private void PipelineExceptionEventHandler(Exception ex)
     {
-        if (_processingLoopService.FaceProcessingPipeline.VideoSource == null)
+        if (ProcessingLoopService.FaceProcessingPipeline.VideoSource == null)
         {
             FaceCamera.StartButtonEnabled = true;
             FaceCamera.StopButtonEnabled = false;
@@ -486,7 +539,7 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
             FaceCamera.IsCameraRunning = false;
         }
 
-        if (_processingLoopService.EyesProcessingPipeline.VideoSource == null)
+        if (ProcessingLoopService.EyesProcessingPipeline.VideoSource == null)
         {
             LeftCamera.StartButtonEnabled = true;
             LeftCamera.StopButtonEnabled = false;
@@ -500,12 +553,12 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task<IVideoSource?> StartCameraAsync(string address)
+    private async Task<IVideoSource?> StartCameraAsync(string address, string preferredCapture = "")
     {
         var camera = address;
         if (string.IsNullOrEmpty(camera)) return null;
 
-        App.DeviceEnumerator.Cameras ??= await App.DeviceEnumerator.UpdateCameras();
+        App.DeviceEnumerator.Cameras ??= App.DeviceEnumerator.UpdateCameras();
 
         if (App.DeviceEnumerator.Cameras.TryGetValue(camera, out var mappedAddress))
         {
@@ -514,7 +567,7 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
 
         return await Task.Run<IVideoSource?>(() =>
         {
-            var cameraSource = new SingleCameraSourceFactory().Create(camera);
+            var cameraSource = SingleCameraSourceFactory.Create(camera, preferredCapture);
             if (cameraSource == null)
                 return null;
 
@@ -532,6 +585,7 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
                 if (testFrame != null)
                     return cameraSource;
             }
+
             _logger.LogError("No data was received from {}, closing...", address);
             cameraSource.Dispose();
             return null;
@@ -541,7 +595,7 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     public void StopCamera(CameraControllerModel model)
     {
-        var pipeline = _processingLoopService.EyesProcessingPipeline;
+        var pipeline = ProcessingLoopService.EyesProcessingPipeline;
         switch (pipeline.VideoSource)
         {
             case SingleCameraSource singleCameraSource:
@@ -581,27 +635,11 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
     }
 
 
-    private SemaphoreSlim _cameraStartLock = new(1, 1);
-    [RelayCommand(AllowConcurrentExecutions = true)]
+    [RelayCommand]
     public async Task StartCamera(CameraControllerModel model)
     {
         SetButtons(model, false, false);
-
-        if (model.Camera == Camera.Face)
-        {
-            await StartCameraAsync(model);
-            return;
-        }
-
-        await _cameraStartLock.WaitAsync();
-        try
-        {
-            await StartCameraAsync(model);
-        }
-        finally
-        {
-            _cameraStartLock.Release();
-        }
+        await StartCameraAsync(model);
     }
 
     private bool IsSameAddressAsOtherEye(CameraControllerModel model)
@@ -620,12 +658,12 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
     {
         var type = model.Camera;
 
-        if (_processingLoopService.EyesProcessingPipeline.VideoSource is DualCameraSource dualSource)
+        if (ProcessingLoopService.EyesProcessingPipeline.VideoSource is DualCameraSource dualSource)
         {
             if (type == Camera.Left && dualSource.RightCam != null)
-                _processingLoopService.EyesProcessingPipeline.VideoSource = dualSource.RightCam;
+                ProcessingLoopService.EyesProcessingPipeline.VideoSource = dualSource.RightCam;
             else if (dualSource.LeftCam != null)
-                _processingLoopService.EyesProcessingPipeline.VideoSource = dualSource.LeftCam;
+                ProcessingLoopService.EyesProcessingPipeline.VideoSource = dualSource.LeftCam;
             else
                 return false;
 
@@ -636,9 +674,10 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
         return false;
     }
 
-    private Task SaveLastOpenedAsync(CameraControllerModel model)
+    private void SaveLastOpened(CameraControllerModel model)
     {
-        return _localSettingsService.SaveSettingAsync("LastOpened" + model.Name, model.DisplayAddress);
+        LocalSettingsService.SaveSetting("LastOpened" + model.Name, model.DisplayAddress);
+        LocalSettingsService.SaveSetting("LastOpenedPreferredCapture" + model.Name, model.SelectedPreferredCapture);
     }
 
     private void SetButtons(CameraControllerModel model, bool startEnabled, bool stopEnabled)
@@ -648,53 +687,54 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
     }
 
 
-    private async Task StartCameraAsync(CameraControllerModel model)
+    private bool IsSameEye(CameraControllerModel model)
     {
         var type = model.Camera;
+        if (type == Camera.Face || !IsSameAddressAsOtherEye(model)) return false;
 
-        var isSameEye = await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            if (type == Camera.Face || !IsSameAddressAsOtherEye(model)) return false;
+        var tryRes = TryHandleSameEyeCamera(model);
+        if (tryRes)
+            SetButtons(model, false, true);
+        return tryRes;
+    }
 
-            var tryRes = TryHandleSameEyeCamera(model);
-            if (tryRes)
-                SetButtons(model, false, true);
-            return tryRes;
-        });
-        if (isSameEye)
+    private async Task StartCameraAsync(CameraControllerModel model)
+    {
+        if (IsSameEye(model))
         {
-            await SaveLastOpenedAsync(model);
+            SaveLastOpened(model);
             return;
         }
 
-        var cameraSource = await StartCameraAsync(model.DisplayAddress);
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        var type = model.Camera;
+
+        var cameraSource = await StartCameraAsync(model.DisplayAddress, model.SelectedPreferredCapture);
+
+        if (cameraSource == null)
         {
-            if (cameraSource == null)
-            {
-                SetButtons(model, true, false);
-                return;
-            }
+            SetButtons(model, true, false);
+            SaveLastOpened(model);
+            return;
+        }
 
-            if (type == Camera.Face)
-            {
-                UpdateFacePipeline(cameraSource);
-            }
-            else
-            {
-                UpdateEyePipeline(cameraSource, type);
-            }
+        if (type == Camera.Face)
+        {
+            UpdateFacePipeline(cameraSource);
+        }
+        else
+        {
+            UpdateEyePipeline(cameraSource, type);
+        }
 
-            model.IsCameraRunning = true;
-            SetButtons(model, false, true);
-        });
+        model.IsCameraRunning = true;
+        SetButtons(model, false, true);
 
-        await SaveLastOpenedAsync(model);
+        SaveLastOpened(model);
     }
 
     private void UpdateFacePipeline(IVideoSource cameraSource)
     {
-        var pipeline = _processingLoopService.FaceProcessingPipeline;
+        var pipeline = ProcessingLoopService.FaceProcessingPipeline;
 
         if (pipeline.VideoSource != null)
         {
@@ -707,7 +747,7 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
 
     private void UpdateEyePipeline(IVideoSource cameraSource, Camera type)
     {
-        var pipeline = _processingLoopService.EyesProcessingPipeline;
+        var pipeline = ProcessingLoopService.EyesProcessingPipeline;
 
         if (pipeline.VideoSource == null)
         {
@@ -753,9 +793,48 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private async Task RequestVRCalibration()
     {
-        await App.Overlay.EyeTrackingCalibrationRequested(CalibrationRoutine.QuickCalibration);
-        await _localSettingsService.SaveSettingAsync("EyeHome_EyeModel", "tuned_temporal_eye_tracking.onnx");
-        await _processingLoopService.SetupEyeInference();
+        var res = await App.Overlay.EyeTrackingCalibrationRequested(RequestedVRCalibration);
+        if (res.success)
+        {
+            if (!Directory.Exists(Utils.ModelsDirectory))
+            {
+                Directory.CreateDirectory(Utils.ModelsDirectory);
+            }
+
+            var destPath = Path.Combine(Utils.ModelsDirectory, $"tuned_temporal_eye_tracking_{DateTime.Now.ToString("yyyyMMdd_HHmmss")}.onnx");
+            File.Move("tuned_temporal_eye_tracking.onnx", destPath);
+            LocalSettingsService.SaveSetting("EyeHome_EyeModel", destPath);
+            var eye = await ProcessingLoopService.LoadEyeInferenceAsync();
+            ProcessingLoopService.EyesProcessingPipeline.InferenceService = eye;
+            SelectedCalibrationTextBlock.Foreground = new SolidColorBrush(Colors.Green);
+        }
+        else
+        {
+            SelectedCalibrationTextBlock.Foreground = new SolidColorBrush(Colors.Red);
+            _logger.LogError(res.status);
+        }
+
+        var previousText = SelectedCalibrationTextBlock.Text;
+        SelectedCalibrationTextBlock.Text = res.status;
+        await Task.Delay(5000);
+        SelectedCalibrationTextBlock.Text = previousText;
+        SelectedCalibrationTextBlock.Foreground = new SolidColorBrush(GetBaseHighColor());
+    }
+
+    public Color GetBaseHighColor()
+    {
+        Color color = Colors.White;
+        switch (Application.Current!.ActualThemeVariant.ToString())
+        {
+            case "Light":
+                color = Colors.Black;
+                break;
+            case "Dark":
+                color = Colors.White;
+                break;
+        }
+
+        return color;
     }
 
     private void MessageDispatched(int msgCount) => _messagesSent += msgCount;
@@ -778,7 +857,7 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
         _leftCamera.Dispose();
         _rightCamera.Dispose();
 
-        _processingLoopService.PipelineExceptionEvent -= PipelineExceptionEventHandler;
+        ProcessingLoopService.PipelineExceptionEvent -= PipelineExceptionEventHandler;
         OscSendService.OnMessagesDispatched -= MessageDispatched;
         _msgCounterTimer.Stop();
     }

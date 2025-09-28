@@ -243,6 +243,8 @@ public class App : Application
             }
         }
 
+        // Initialize settings
+        var localSettings = Ioc.Default.GetService<ILocalSettingsService>();
 
         Assembly assembly = Assembly.GetExecutingAssembly();
         Version version = assembly.GetName().Version!;
@@ -252,7 +254,7 @@ public class App : Application
         Task.Run(async () => await _host.StartAsync());
 
         var activation = Ioc.Default.GetRequiredService<IActivationService>();
-        Task.Run(async () => await activation.ActivateAsync(null!));
+        Task.Run(() => activation.Activate(null!));
 
         var vm = Ioc.Default.GetRequiredService<MainViewModel>();
         switch (ApplicationLifetime)
@@ -270,8 +272,6 @@ public class App : Application
                 break;
         }
 
-        _host.Services.GetRequiredService<IThemeSelectorService>().SetRequestedThemeAsync();
-
         base.OnFrameworkInitializationCompleted();
     }
 
@@ -279,8 +279,8 @@ public class App : Application
     {
         if (ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime) return;
 
-        var vrcft = Ioc.Default.GetRequiredService<IMainService>();
-        Task.Run(vrcft.Teardown);
+        var mainService = Ioc.Default.GetRequiredService<IMainService>();
+        Task.Run(mainService.Teardown);
 
         var loop = Ioc.Default.GetRequiredService<ProcessingLoopService>();
         loop.FaceProcessingPipeline.VideoSource?.Dispose();

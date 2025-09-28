@@ -26,7 +26,7 @@ public sealed class DesktopDeviceEnumerator(ILogger<DesktopDeviceEnumerator> log
     /// Lists available cameras with friendly names as dictionary keys and device identifiers as values.
     /// </summary>
     /// <returns>Dictionary with friendly names as keys and device IDs as values</returns>
-    public Task<Dictionary<string, string>> UpdateCameras()
+    public Dictionary<string, string> UpdateCameras()
     {
         Logger.LogDebug("Starting camera device enumeration...");
         Dictionary<string, string> cameraDict = new Dictionary<string, string>();
@@ -64,13 +64,13 @@ public sealed class DesktopDeviceEnumerator(ILogger<DesktopDeviceEnumerator> log
             cameraDict.Add($"Error: {ex.Message}", "error");
         }
 
-        Logger.LogInformation("Camera enumeration completed. Found {CameraCount} devices", cameraDict.Count);
+        Logger.LogDebug("Camera enumeration completed. Found {CameraCount} devices", cameraDict.Count);
         foreach (var camera in cameraDict)
         {
             Logger.LogDebug("Detected camera: '{FriendlyName}' -> '{DeviceId}'", camera.Key, camera.Value);
         }
 
-        return Task.FromResult(cameraDict);
+        return cameraDict;
     }
 
     private void AddOpenCvCameras(Dictionary<string, string> cameraDict)
@@ -112,7 +112,7 @@ public sealed class DesktopDeviceEnumerator(ILogger<DesktopDeviceEnumerator> log
         for (var index = 0; index < videoInputDevices.Length; index++)
         {
             var dev = videoInputDevices[index];
-            logger.LogInformation("Found device: {}, ClassId: {}, Path: {}", dev.Name, dev.ClassID, dev.DevicePath);
+            logger.LogDebug("Found device: {}, ClassId: {}, Path: {}", dev.Name, dev.ClassID, dev.DevicePath);
             EnsureUniqueKey(cameraDict, dev.Name, index.ToString());
         }
         #endif

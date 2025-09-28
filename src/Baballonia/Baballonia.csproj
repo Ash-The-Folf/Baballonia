@@ -7,8 +7,8 @@
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	<NoWarn>CS8618;CS8509;CS0067;CS8613;CS8622;MVVMTK0034</NoWarn>
 	<Company>Paradigm Reality Enhancement Labs</Company>
-	<AssemblyVersion>1.1.0.1</AssemblyVersion>
-	<FileVersion>1.1.0.1</FileVersion>
+	<AssemblyVersion>1.1.0.7</AssemblyVersion>
+	<FileVersion>1.1.0.7</FileVersion>
     </PropertyGroup>
 
     <ItemGroup>
@@ -22,7 +22,10 @@
         <None Update="LocalSettings.json">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
-        <None Update="Firmware\babble_multimodal_firmware_1.0.0.bin">
+        <None Update="Firmware\Binaries\babble_multimodal_firmware_1.0.0.bin">
+          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+        <None Update="Firmware\Binaries\babble_expremental_mutimodal_firmware_1.1.0.bin">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
     </ItemGroup>
@@ -86,26 +89,6 @@
         <AutoGen>True</AutoGen>
         <DependentUpon>Resources.resx</DependentUpon>
       </Compile>
-      <Compile Update="Assets\Resources.es.Designer.cs">
-        <DesignTime>True</DesignTime>
-        <AutoGen>True</AutoGen>
-        <DependentUpon>Resources.es.resx</DependentUpon>
-      </Compile>
-      <Compile Update="Assets\Resources.ja.Designer.cs">
-        <DesignTime>True</DesignTime>
-        <AutoGen>True</AutoGen>
-        <DependentUpon>Resources.ja.resx</DependentUpon>
-      </Compile>
-      <Compile Update="Assets\Resources.pl.Designer.cs">
-        <DesignTime>True</DesignTime>
-        <AutoGen>True</AutoGen>
-        <DependentUpon>Resources.pl.resx</DependentUpon>
-      </Compile>
-      <Compile Update="Assets\Resources.zh-cn.Designer.cs">
-        <DesignTime>True</DesignTime>
-        <AutoGen>True</AutoGen>
-        <DependentUpon>Resources.zh-cn.resx</DependentUpon>
-      </Compile>
     </ItemGroup>
 
 
@@ -144,13 +127,9 @@
 		    <LastGenOutput>Resources.pl.Designer.cs</LastGenOutput>
             <LogicalName>Baballonia.Assets.Resources.pl.resources</LogicalName>
 		</EmbeddedResource>
-		<EmbeddedResource Update="Assets\Resources.zh-cn.resx">
-		    <Generator>ResXFileCodeGenerator</Generator>
-		    <LastGenOutput>Resources.zh-cn.Designer.cs</LastGenOutput>
-            <LogicalName>Baballonia.Assets.Resources.zh-cn.resources</LogicalName>
-		</EmbeddedResource>
 	</ItemGroup>
 	<ItemGroup>
+	  <ProjectReference Include="..\Baballonia.FastCorruptionDetector\Baballonia.FastCorruptionDetector.csproj" />
 	  <ProjectReference Include="..\Baballonia.SDK\Baballonia.SDK.csproj" />
 	  <ProjectReference Include="..\HyperText.Avalonia\HyperText.Avalonia\HyperText.Avalonia.csproj" />
 	</ItemGroup>
@@ -164,6 +143,12 @@
 	  <Folder Include="Firmware\Linux\" />
 	  <Folder Include="Firmware\MacOS\" />
 	  <Folder Include="Firmware\Windows\" />
+	</ItemGroup>
+	<ItemGroup>
+	  <AvaloniaResource Update="Assets\Resources.resx">
+	    <Generator>PublicResXFileCodeGenerator</Generator>
+	    <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+	  </AvaloniaResource>
 	</ItemGroup>
 
 </Project>
