@@ -1,16 +1,19 @@
-﻿using System.Threading.Tasks;
+﻿using Avalonia.Logging;
 using Baballonia.Contracts;
 using Microsoft.Extensions.Logging;
+using System.Threading.Tasks;
 
 namespace Baballonia.Services;
 
 public class ActivationService(
     IThemeSelectorService themeSelectorService,
     ILanguageSelectorService languageSelectorService,
-    ILogger<ActivationService> logger)
+    ILogger<ActivationService> logger,
+    OpenVRService _openVRService)
     : IActivationService
 {
     public ILogger<ActivationService> Logger { get; } = logger;
+    public OpenVRService OpenVRService { get; } = _openVRService;
 
     public async Task ActivateAsync(object activationArgs)
     {
@@ -70,6 +73,13 @@ public class ActivationService(
 
         logger.LogInformation("Initializing modules...");
         Dispatcher.UIThread.Invoke(() => libManager.Initialize());*/
+        
+        //checking to see if AutoStart has checks pass during service activation
+        logger.LogInformation("Configuring OpenVR...");
+        if (!_openVRService.AutoStart())
+        {
+            logger.LogWarning("Failed to configure OpenVR during ActivationService startup. Skipping.");
+        }
 
         await Task.CompletedTask;
     }

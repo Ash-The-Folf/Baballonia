@@ -280,6 +280,13 @@
                 IconPath="ArrowSyncRegular"
                 SettingToggled="{Binding CheckForUpdates, Mode=TwoWay}" />
 
+            <controls:SettingsToggle
+              IsEnabled="{Binding SteamvrAutoStart, Mode=OneWay}"
+                Title="Auto Start with SteamVR"
+                Description="Should the app launch with SteamVR? (Change requires a SteamVR restart.)"
+                IconPath="PowerRegular"
+                SettingToggled="{Binding SteamVRAutoStart, Mode=TwoWay}" />
+
             <Border
                 Padding="15,5,15,5"
                 Background="{DynamicResource SystemChromeMediumLowColor}"

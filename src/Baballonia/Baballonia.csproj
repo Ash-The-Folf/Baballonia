@@ -121,6 +121,9 @@
 		<EmbeddedResource Include="faceModel.onnx">
 		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</EmbeddedResource>
+        <EmbeddedResource Include="SteamVR\manifest.vrmanifest" Link ="manifest.vrmanifest">
+         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </EmbeddedResource>
 		<EmbeddedResource Update="Assets\Resources.resx">
 		    <Generator>PublicResXFileCodeGenerator</Generator>
 		    <LastGenOutput>Resources.Designer.cs</LastGenOutput>

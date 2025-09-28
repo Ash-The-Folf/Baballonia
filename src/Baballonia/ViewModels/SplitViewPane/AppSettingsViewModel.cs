@@ -16,6 +16,7 @@ public partial class AppSettingsViewModel : ViewModelBase
     public ILocalSettingsService SettingsService { get; }
     public GithubService GithubService { get; private set;}
     public ParameterSenderService ParameterSenderService { get; private set;}
+    private OpenVRService OpenVRService { get; }
 
     [ObservableProperty]
     [property: SavedSetting("AppSettings_RecalibrateAddress", "/avatar/parameters/etvr_recalibrate")]
@@ -50,6 +51,10 @@ public partial class AppSettingsViewModel : ViewModelBase
     private bool _useGPU;
 
     [ObservableProperty]
+    [property: SavedSetting("AppSettings_SteamvrAutoStart", true)]
+    private bool _steamvrAutoStart;
+
+    [ObservableProperty]
     [property: SavedSetting("AppSettings_CheckForUpdates", false)]
     private bool _checkForUpdates;
 
@@ -66,7 +71,7 @@ public partial class AppSettingsViewModel : ViewModelBase
     ];
 
     [ObservableProperty] private bool _onboardingEnabled;
-
+    public bool IsOpenVREnabled => OpenVRService.IsAutoStartReady;
     private ProcessingLoopService _processingLoopService;
     public AppSettingsViewModel()
     {
@@ -75,6 +80,8 @@ public partial class AppSettingsViewModel : ViewModelBase
         GithubService = Ioc.Default.GetService<GithubService>()!;
         SettingsService = Ioc.Default.GetService<ILocalSettingsService>()!;
         _processingLoopService = Ioc.Default.GetService<ProcessingLoopService>()!;
+        OpenVRService = Ioc.Default.GetService<OpenVRService>()!;
+        OpenVRService.CheckIfReadyIfIsnt();
         SettingsService.Load(this);
 
         // Handle edge case where OSC port is used and the system freaks out
@@ -118,6 +125,17 @@ public partial class AppSettingsViewModel : ViewModelBase
             SettingsService.Save(this);
         };
     }
+
+    public bool SteamVRAutoStart
+    {
+        get => OpenVRService.SteamvrAutoStart;
+        set
+        {
+           OpenVRService.SteamvrAutoStart = value;
+            SettingsService.Save("AppSettings_SteamvrAutoStart");
+        }
+    }
+
 
     partial void OnUseGPUChanged(bool value)
     {
