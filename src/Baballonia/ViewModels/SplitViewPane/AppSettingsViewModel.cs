@@ -88,55 +88,60 @@ public partial class AppSettingsViewModel : ViewModelBase
         _logger = Ioc.Default.GetService<ILogger<AppSettingsViewModel>>()!;
         SettingsService.Load(this);
 
-        // Handle edge case where OSC port is used and the system freaks out
-        if (OscTarget.OutPort == 0)
-        {
-            const int Port = 8888;
-            OscTarget.OutPort = Port;
-            SettingsService.SaveSetting("OSCOutPort", Port);
+            // Handle edge case where OSC port is used and the system freaks out
+            if (OscTarget.OutPort == 0)
+            {
+                const int Port = 8888;
+                OscTarget.OutPort = Port;
+                SettingsService.SaveSetting("OSCOutPort", Port);
+            }
+
+            // Risky Settings
+            ParameterSenderService = Ioc.Default.GetService<ParameterSenderService>()!;
+
+            OnboardingEnabled = Utils.IsSupportedDesktopOS;
+
+            PropertyChanged += (_, _) =>
+            {
+                if (!_oneEuroMinEnabled)
+                {
+                    _processingLoopService.FaceProcessingPipeline.Filter = null;
+                    _processingLoopService.EyesProcessingPipeline.Filter = null;
+                }
+                else
+                {
+                    float[] faceArray = new float[Utils.FaceRawExpressions];
+                    var faceFilter = new OneEuroFilter(
+                        faceArray,
+                        minCutoff: _oneEuroMinFreqCutoff,
+                        beta: _oneEuroSpeedCutoff
+                    );
+                    float[] eyeArray = new float[Utils.EyeRawExpressions];
+                    var eyeFilter = new OneEuroFilter(
+                        eyeArray,
+                        minCutoff: _oneEuroMinFreqCutoff,
+                        beta: _oneEuroSpeedCutoff
+                    );
+                    _processingLoopService.FaceProcessingPipeline.Filter = faceFilter;
+                    _processingLoopService.EyesProcessingPipeline.Filter = eyeFilter;
+                }
+
+                SettingsService.Save(this);
+            };
         }
-
-        // Risky Settings
-        ParameterSenderService = Ioc.Default.GetService<ParameterSenderService>()!;
-
-        OnboardingEnabled = Utils.IsSupportedDesktopOS;
-
-        PropertyChanged += (_, _) =>
-        {
-            if (!_oneEuroMinEnabled)
-            {
-                _processingLoopService.FaceProcessingPipeline.Filter = null;
-                _processingLoopService.EyesProcessingPipeline.Filter = null;
-            }
-            else
-            {
-                float[] faceArray = new float[Utils.FaceRawExpressions];
-                var faceFilter = new OneEuroFilter(
-                    faceArray,
-                    minCutoff: _oneEuroMinFreqCutoff,
-                    beta: _oneEuroSpeedCutoff
-                );
-                float[] eyeArray = new float[Utils.EyeRawExpressions];
-                var eyeFilter = new OneEuroFilter(
-                    eyeArray,
-                    minCutoff: _oneEuroMinFreqCutoff,
-                    beta: _oneEuroSpeedCutoff
-                );
-                _processingLoopService.FaceProcessingPipeline.Filter = faceFilter;
-                _processingLoopService.EyesProcessingPipeline.Filter = eyeFilter;
-            }
-
-            SettingsService.Save(this);
-        };
-    }
-
-    public bool SteamVRAutoStart
+  partial void OnSteamvrAutoStartChanged(bool value)
     {
-        get => OpenVRService.SteamvrAutoStart;
-        set
+        var readValue = SettingsService.ReadSetting("AppSettings_SteamvrAutoStart", value);
+        if (readValue == value)
+            return;
+        try
         {
            OpenVRService.SteamvrAutoStart = value;
-            SettingsService.Save("AppSettings_SteamvrAutoStart");
+           SettingsService.SaveSetting("AppSettings_SteamvrAutoStart", value);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError("DLL not found!", e);
         }
     }
 

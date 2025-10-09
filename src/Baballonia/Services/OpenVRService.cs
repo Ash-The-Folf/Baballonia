@@ -8,7 +8,7 @@ using Valve.VR;
 
 namespace Baballonia.Services
 {
-    public class OpenVRService
+   public class OpenVRService
     {
         //app key needed for vrmanifest
         private string application_key = "projectbabble.Baballonia";
@@ -67,7 +67,12 @@ namespace Baballonia.Services
         {
             if (!IsAutoStartReady)
             {
-                AutoStart();
+                try {
+                    AutoStart();
+               } catch (Exception e) {
+                    _logger.LogWarning("dll not found! Your current OS might not be supported for SteamVR AutoStart", e);
+
+                }
             }
         }
 
